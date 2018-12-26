@@ -11,13 +11,11 @@ import (
 // findByte will return the first position at or after offset of the specified
 // byte. -1 is returned if the byte is not found.
 func findByte(data []byte, lookingFor byte, offset int) int {
-	for ; offset < len(data); offset++ {
-		if data[offset] == lookingFor {
-			return offset
-		}
+	i := bytes.IndexRune(data[offset:], rune(lookingFor))
+	if i > -1 {
+		return offset + i
 	}
-
-	return -1
+	return i
 }
 
 // DecodePHPString converts a string of ASCII bytes (like "Bj\xc3\xb6rk") back
@@ -77,50 +75,11 @@ func checkType(data []byte, typeCharacter byte, offset int) bool {
 	return len(data) > offset && data[offset] == typeCharacter
 }
 
-func UnmarshalArray(data []byte) ([]interface{}, error) {
-	v, _, err := consumeArray(data, 0)
+// Unmarshal arrays (with int and string keys)
+func UnmarshalAssociativeArray(data []byte) (map[interface{}]interface{}, error) {
+	v, _, err := consumeAssociativeArray(data, 0)
 
 	return v, err
-}
-
-func UnmarshalAssociativeArray(data []byte) (map[interface{}]interface{}, error) {
-	// We may be unmarshalling an object into a map.
-	if checkType(data, 'O', 0) {
-		result, _, err := consumeObjectAsMap(data, 0)
-
-		return result, err
-	}
-
-	if !checkType(data, 'a', 0) {
-		return map[interface{}]interface{}{},
-			errors.New("not an array or object")
-	}
-
-	rawLength, offset := consumeStringUntilByte(data, ':', 2)
-	length, err := strconv.Atoi(rawLength)
-	if err != nil {
-		return map[interface{}]interface{}{}, err
-	}
-
-	// Skip over the ":{"
-	offset += 2
-
-	result := map[interface{}]interface{}{}
-	for i := 0; i < length; i++ {
-		var key interface{}
-
-		key, offset, err = consumeNext(data, offset)
-		if err != nil {
-			return map[interface{}]interface{}{}, err
-		}
-
-		result[key], offset, err = consumeNext(data, offset)
-		if err != nil {
-			return map[interface{}]interface{}{}, err
-		}
-	}
-
-	return result, nil
 }
 
 func UnmarshalObject(data []byte, v interface{}) error {
@@ -186,8 +145,8 @@ func Unmarshal(data []byte, v interface{}) error {
 			return nil
 		}
 
-		// Otherwise this must be a slice (array)
-		v, err := UnmarshalArray(data)
+		// Otherwise this must be a map (array)
+		v, err := UnmarshalAssociativeArray(data)
 		if err != nil {
 			return err
 		}

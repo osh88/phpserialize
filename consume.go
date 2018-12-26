@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strconv"
 	"fmt"
+	"unicode/utf8"
 )
 
 // The internal consume functions work as the parser/lexer when reading
@@ -90,8 +91,14 @@ func consumeStringRealPart(data []byte, offset int) (string, int, error) {
 
 	s := DecodePHPString(data)
 
+	end := offset
+	for i:=0; i<length; i++ {
+		_, n := utf8.DecodeRune(data[end:])
+		end += n
+	}
+
 	// The +2 is to skip over the final '";'
-	return s[offset: offset+length], offset + length + 2, nil
+	return s[offset: end], end + 2, nil
 }
 
 func consumeNil(data []byte, offset int) (interface{}, int, error) {
@@ -239,7 +246,7 @@ func consumeNext(data []byte, offset int) (interface{}, int, error) {
 
 	switch data[offset] {
 	case 'a':
-		return consumeArray(data, offset)
+		return consumeAssociativeArray(data, offset)
 	case 'b':
 		return consumeBool(data, offset)
 	case 'd':
@@ -258,44 +265,40 @@ func consumeNext(data []byte, offset int) (interface{}, int, error) {
 		string(data[offset:]))
 }
 
-func consumeArray(data []byte, offset int) ([]interface{}, int, error) {
-	if !checkType(data, 'a', offset) {
-		return []interface{}{}, -1, errors.New("not an array")
+func consumeAssociativeArray(data []byte, offset int) (map[interface{}]interface{}, int, error) {
+	// We may be unmarshalling an object into a map.
+	if checkType(data, 'O', 0) {
+		return consumeObjectAsMap(data, offset)
+	}
+
+	if !checkType(data, 'a', 0) {
+		return map[interface{}]interface{}{}, -1,
+			errors.New("not an array or object")
 	}
 
 	rawLength, offset := consumeStringUntilByte(data, ':', offset+2)
 	length, err := strconv.Atoi(rawLength)
 	if err != nil {
-		return []interface{}{}, -1, err
+		return map[interface{}]interface{}{}, -1, err
 	}
 
 	// Skip over the ":{"
 	offset += 2
 
-	result := make([]interface{}, length)
+	result := map[interface{}]interface{}{}
 	for i := 0; i < length; i++ {
-		// Even non-associative arrays (arrays that are zero-indexed)
-		// still have their keys serialized. We need to read these
-		// indexes to make sure we are actually decoding a slice and not
-		// a map.
-		var index int64
-		index, offset, err = consumeInt(data, offset)
+		var key interface{}
+
+		key, offset, err = consumeNext(data, offset)
 		if err != nil {
-			return []interface{}{}, -1, err
+			return map[interface{}]interface{}{}, -1, err
 		}
 
-		if index != int64(i) {
-			return []interface{}{}, -1,
-				errors.New("cannot decode map as slice")
-		}
-
-		// Now we consume the value
-		result[i], offset, err = consumeNext(data, offset)
+		result[key], offset, err = consumeNext(data, offset)
 		if err != nil {
-			return []interface{}{}, -1, err
+			return map[interface{}]interface{}{}, -1, err
 		}
 	}
 
-	// The +1 is for the final '}'
 	return result, offset+1, nil
 }
