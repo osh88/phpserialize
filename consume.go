@@ -89,16 +89,19 @@ func consumeStringRealPart(data []byte, offset int) (string, int, error) {
 	// redundant.
 	offset = newOffset + 1
 
-	s := DecodePHPString(data)
-
+	// length - count of chars.
+	// Correct length of byte slice,
+	// if rune length greater than 1 byte.
 	end := offset
 	for i:=0; i<length; i++ {
 		_, n := utf8.DecodeRune(data[end:])
 		end += n
 	}
 
+	s := DecodePHPString(data[offset:end])
+
 	// The +2 is to skip over the final '";'
-	return s[offset: end], end + 2, nil
+	return s, end + 2, nil
 }
 
 func consumeNil(data []byte, offset int) (interface{}, int, error) {
